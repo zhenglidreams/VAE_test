@@ -8,9 +8,9 @@ if not '../' in sys.path:
     sys.path.append('../')
 import os
 from pathlib import Path
-from pytorch_model.Aggregation import NoAggregation, Addition, Concatenation
-from pytorch_model.Operation import *
-from pytorch_model.Blocks import *
+#from pytorch_model.Aggregation import NoAggregation, Addition, Concatenation
+#from pytorch_model.Operation import *
+#from pytorch_model.Blocks import *
 from copy import copy
 
 print('settings is here')
@@ -44,147 +44,28 @@ DATA_PATH = EXEC_PATH/Path(r"../datasets/clnn_data")  # valid for datasets that 
 EPS = 1e-10
 
 
-AGG_LOOKUP = {0: NoAggregation,
-              1: Addition,
-              2: Concatenation,
-}
-
-if not BLOCK_SEARCH_SPACE:
-    OP_LOOKUP = {0: Identity,
-                 1: Conv,
-                 2: SepConv,
-                 3: GrpConv,
-                 4: Pool,
-    }
-    OP_PARAMS = {
-        0: None,
-        1: ['conv_k_size', 'batch_norm', 'activation'],  # Conv
-        2: ['conv_k_size', 'batch_norm', 'activation'],  # SepConv
-        3: ['conv_k_size', 'batch_norm', 'activation'],  # GrpConv
-        4: ['max_or_avg', 'pool_k_size', 'ch_factor'],  # Pool
-    }
-else:
-    OP_LOOKUP = {
-        0: Identity,
-        1: ResBasic,
-        2: ResBottleneck,
-        3: DenseBasic,
-        4: DenseBottleneck,
-        5: InceptionResnet_A,
-        6: InceptionResnet_BC,
-        7: Pool,
-    }
-    OP_PARAMS = {
-        0: None,
-        1: ['res_k_size', 'res_downsample'],  # ResBasic
-        2: ['res_k_size', 'res_downsample'],  # ResBottleneck
-        3: ['dense_growth_factor', 'dense_transition'],  # DenseBasic
-        4: ['dense_growth_factor', 'dense_transition'],  # DenseBottleneck
-        5: ['incres_k_size', 'incres_bottle_factor'],  # InceptionResnet-A
-        6: ['incres_k_size', 'incres_bottle_factor'],  # InceptionResnet-BC
-        7: ['max_or_avg', 'pool_k_size'],  # Pool
-    }
-
 MAX_OUTDEG_INPUT = 999
 MAX_INDEG = 2  # Do not change these values inconsiderately! Untested behaviour could occur.
 MAX_OUTDEG_HIDDEN = 2  # Max outdegree of hidden nodes (i.e. all except input node (Node 0) and classifier node)
 
-# Default hyperparameters for defining Network topologies
-DEFAULT_NTW_HPARAMS = dict(
-    max_outdeg_input=999,
-    max_indeg= 1 + SKIP_ALLOWED,
-    max_outdeg_hidden= 1 + SKIP_ALLOWED,
-    layers_ini=3 * (1 + BLOCK_SEARCH_SPACE),  # number of layers of initial architectures
-    out_ch_0=64 // (1 + BLOCK_SEARCH_SPACE),  # number of channels out of the input node
-)
+VAE_JOINT=dict(joint_hidden = [32, 64, 128, 256,512],
+    joint_k_sizes=[1,1,3,3,3],
+    joint_strides=[1,2,2,2,2],
+    joint_padding=[1,1,1,1,1],
+    joint_outpadding=[0,0,0,1,1])
 
-# Hyperparameters for training and evaluating individual Networks during search
-PARTIAL_EVAL_HPARAMS=dict(
-    max_epochs=15 * (IS_COMPLEX + 1),  # !!!!!!!!!!!!!!!!!!!!!!
-    lr_ini=0.1 / (IS_COMPLEX + 1),
-    lr_min=1.e-7,
-    betas=(0.95, 0.99),
-    weight_decay=1.e-5,
-    init_params=dict(method='he_normal', b_value=0.),  # use `he_normal` (`he_uniform` is dubious in Pytorch)
-    grad_norm_clip=1.,
-    n_restarts=0,  # no restarts during search, we want good anytime performance
-    T_mult=1,
-    early_stop=True,
-    patience=2,
-    thresh=0.005 if not IS_COMPLEX else 0.003,
-    verbose=True,
-    n_nodes=1,
-    n_workers=4  # set to zero on a Windows machine (bug in Pytorch)
-)
 
-FINAL_EVAL_HPARAMS = copy(PARTIAL_EVAL_HPARAMS)  # hyperparameters for training final committee members
-FINAL_EVAL_HPARAMS['max_epochs'] = 210 if IS_COMPLEX else 50
-FINAL_EVAL_HPARAMS['lr_ini'] /= 3.
-FINAL_EVAL_HPARAMS['lr_min'] = 0.
-FINAL_EVAL_HPARAMS['n_restarts'] = 1 + IS_COMPLEX
-FINAL_EVAL_HPARAMS['T_mult'] = 1 + IS_COMPLEX
-FINAL_EVAL_HPARAMS['early_stop'] = False
-
-DEFAULT_RSEARCH_HPARAMS = dict(  # default hyperparameters determining general run conditions for AIS algorithms
-    layers_ini=3 * (1 + BLOCK_SEARCH_SPACE),  # number of layers of initial architectures
-    out_ch_0=64 // (1 + BLOCK_SEARCH_SPACE),  # number of channels out of the input node
-    max_walltime=999999,
-    verbose=True,
-)
-
-DEFAULT_CLONALG_HPARAMS = dict(  # default hyperparameters determining general run conditions for AIS algorithms
-    patience_inner=2,  # patience for inner loop stopping
-    thresh_inner=0.005 if IS_COMPLEX else 0.0075,  # fitness threshold for inner loop stopping
-    patience_outer=2,  # patience for outer loop early stopping
-    thresh_outer=0.005 if IS_COMPLEX else 0.0075,  # fitness threshold for outer loop stopping
-    insert_period=1,
-    max_gens=40,  # max number of generations for training
-    max_in_arch_ratio=0.95,
-    use_special_fit='mean',  # None, 'mean' or 'adj'
-    verbose=True,
-    max_time=999999,  # for comparison with DeepSwarm
-)
-
-ALIGN_METHOD = 'inter'
-PAD_METHOD = 'constant' if not IS_COMPLEX else 'reflect'  # change for CIFAR-10 experiments
-INTER_METHOD = 'nearest' if not IS_COMPLEX else 'bilinear'  # nearest / bilinear
-
-SEARCH_DATA_HPARAMS = dict(
-    train_size=0.2,  # !!!!!!!!!!!!!!!!!!!!!! 0.2
-    valid_size=0.2,  # !!!!!!!!!!!!!!!!!!!!!! 0.2
-    test_size=1.,
-    batch_size=64 if TASK == 'stocks' else 128 * (2 - IS_COMPLEX),
-    augment_val=False,  # set to True if overfitting the validation set.
-    cutout=IS_COMPLEX,
-    pad_crop=False if TASK=='stocks' else True,
-    pad_fill='zero' if not IS_COMPLEX else 'reflect',
-    flip=IS_COMPLEX,
-)
-COMMITTEE_DATA_HPARAMS = dict(
-    train_size=0.998, # !!!!!!!!!! 0.998
-    valid_size=0.002,
-    test_size = 1.,
-    batch_size=64 * (2 - IS_COMPLEX),
-    augment_val=False,
-    whiten=False,
-    cutout=IS_COMPLEX,
-    pad_crop=False if TASK=='stocks' else True,
-    pad_fill='zero' if not IS_COMPLEX else 'reflect',
-    flip=IS_COMPLEX,
-)
-
-# Grammar-VAE hyperparameters
 VAE_HPARAMS = dict(
     # Note: when using the integrated VAE/Predictor, all these keys will be renamed vae_*
     weights_path=None,
     max_depth=10,
     n_chars=29,
-    #device='cuda',
+    # device='cuda',
     max_len=56,  # maximum absolute length of all strings produced, regardless of the number of layers in the arch.
                  # only use even numbers when using a CNN decoder. Set as close as possible as maximum number of
                  # productions that can be used with the specified max number of layers.
     weighted_sampling=True,
-    temperature=-.1,  # softmax temperature for sampling sentence lengths; 0 = uniform distribution
+    temperature=0.5,  # softmax temperature for sampling sentence lengths; 0 = uniform distribution
     layer_symbol='LAY',
     # data_size=1,  # how many sequences constitute an epoch
     batch_size=256,  # must be >= 2
@@ -206,7 +87,7 @@ VAE_HPARAMS = dict(
     epsilon_std=0.01,  # stdev for the random variable sampled from N(0, std). Critical for performance
 
     # training parameters
-    max_steps=50000,
+    max_steps=30000,
     lr_ini=1e-4,
     lr_min=1e-6,
     lr_reduce_patience=1500,
@@ -221,6 +102,16 @@ VAE_HPARAMS = dict(
     cont_gamma= 30.,
     disc_gamma= 30.,
     alpha=30.,
+    joint_hidden = VAE_JOINT['joint_hidden'],
+    joint_k_sizes=VAE_JOINT['joint_k_sizes'],
+    joint_strides=VAE_JOINT['joint_strides'],
+    joint_padding=VAE_JOINT['joint_padding'],
+    joint_outpadding=VAE_JOINT['joint_outpadding'],
+    joint_hidden_d = VAE_JOINT['joint_hidden'][::-1],
+    joint_k_sizes_d =VAE_JOINT['joint_k_sizes'][::-1],
+    joint_strides_d = VAE_JOINT['joint_strides'][::-1],
+    joint_padding_d = VAE_JOINT['joint_padding'][::-1],
+    joint_outpadding_d = VAE_JOINT['joint_outpadding'][::-1],
     con_min_capacity = 0.,
     con_max_capacity = 25.,
     dis_min_capacity= 0.,
@@ -229,6 +120,7 @@ VAE_HPARAMS = dict(
     disc_iter=100,
     anneal_rate=3e-5,
     anneal_interval=100
+
 )
 
 # Performance predictor hyperparameters
@@ -242,13 +134,12 @@ PRED_HPARAMS = dict(
     weights_path=None,
     warm_up_period=3,  # number of generations to wait for before starting to train the predictor
     max_depth=VAE_HPARAMS['max_depth'],
-    in_dim=VAE_HPARAMS['latent_size'],
-    c_dim=VAE_HPARAMS['categorical_channel'],
-      # should be the same value as VAE_HPARAMS['latent_size']
-    hid_dims='2048,2048,2048,1024',  # dimensions of the hidden fully-connected layers
-    droprate_hidden=0.,
+    in_dim=VAE_HPARAMS['latent_size'], 
+    c_dim=VAE_HPARAMS['categorical_channel'], # should be the same value as VAE_HPARAMS['latent_size']
+    hid_dims='2048,2048,2048,2048,1024',  # dimensions of the hidden fully-connected layers
+    droprate_hidden=0.25,
     droprate_head=0.2,
-    max_epochs=20,  # number of epochs per training round
+    max_epochs=30,  # number of epochs per training round
     batch_sz=128,
     w_decay=1.e-5,
     lr_ini=1e-4,
